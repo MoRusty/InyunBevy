@@ -13,8 +13,7 @@ use bevy::{
 };
 use rand::RngExt;
 
-use crate::assets::CityAssets;
-use crate::generate_city::{spawn_city, CityRoot};
+
 
 #[derive(Resource)]
 pub struct Settings {
@@ -62,16 +61,6 @@ pub fn settings_ui() -> impl Scene {
             }
             Children [
                 Text("Settings"),
-                (
-                    @FeathersCheckbox {
-                        @caption: bsn! { Text("Simulate Cars") ThemedText }
-                    }
-                    Checked
-                    on(checkbox_self_update)
-                    on(|change: On<ValueChange<bool>>, mut settings: ResMut<Settings>| {
-                        settings.simulate_cars = change.value;
-                    })
-                ),
                 (
                     @FeathersCheckbox {
                         @caption: bsn! { Text("Shadow maps enabled") ThemedText }
@@ -145,24 +134,7 @@ pub fn settings_ui() -> impl Scene {
                         }
                     )
                 ),
-                (
-                    @FeathersButton {
-                        @caption: bsn! { Text("Regenerate City") ThemedText }
-                    }
-                    on(
-                        |_activate: On<Activate>,
-                         mut commands: Commands,
-                         city_root: Single<Entity, With<CityRoot>>,
-                         assets: Res<CityAssets>| {
-                            commands.entity(*city_root).despawn();
 
-                            let mut rng = rand::rng();
-                            let seed = rng.random::<u64>();
-                            println!("new seed: {seed}");
-                            spawn_city(&mut commands, &assets, seed, 32);
-                        }
-                    )
-                ),
             ]
         )]
     }

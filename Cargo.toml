@@ -6,19 +6,13 @@ publish = false
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-# Points to your local bevy checkout (absolute path so this project can be moved anywhere on this machine).
-# If you want to make this truly portable, replace with:
-#   bevy = { git = "https://github.com/bevyengine/bevy.git", features = [...] }
-bevy = { version = "0.19", features = [
-  "https",
-  "free_camera",
-  "bevy_feathers",
-  "web_asset_cache",
-  "bevy_dev_tools",
-] }
+
+bevy = { version = "0.19", features = ["https", "free_camera", "bevy_feathers", "web_asset_cache", "bevy_dev_tools"] }
 
 argh = "0.1"
 noise = "0.9.0"
+bevy_voxel_world = "0.17.0"
 rand = "0.10.0"
 
 bevy_cube_marcher = { version = "0.5.1", features = ["gpu"] }
+

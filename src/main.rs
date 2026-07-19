@@ -1,116 +1,99 @@
-//! A procedurally generated city.
-//!
-//! This scene is intended to be an attractive, fairly realistic stress test of Bevy's capacity
-//! to model extremely large scenes.
-//! As a result, the complexity is higher than in most examples or benchmarks —
-//! we want to use a large number of features so that pathological paths
-//! are caught during development, rather than by end users.
-
-use argh::FromArgs;
-//use assets::{load_assets, CityAssets};
+use std::sync::Arc;
 use bevy::{
     anti_alias::taa::TemporalAntiAliasing,
-    camera::{visibility::NoCpuCulling, Exposure, Hdr},
+    camera::{Exposure, Hdr}, //need to add gpuCulling manually?
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
-    color::palettes::css::WHITE,
-    feathers::{dark_theme::create_dark_theme, theme::UiTheme, FeathersPlugins},
+    feathers::FeathersPlugins,
     light::{
         atmosphere::{Falloff, PhaseFunction, ScatteringMedium, ScatteringTerm},
         Atmosphere, AtmosphereEnvironmentMapLight,
     },
-    pbr::{
-        wireframe::{WireframeConfig, WireframePlugin},
-        AtmosphereSettings, ContactShadows,
-    },
+    pbr::{wireframe::WireframePlugin, AtmosphereSettings, ContactShadows},
     post_process::bloom::Bloom,
+    platform::collections::HashMap,
     prelude::*,
     window::{PresentMode, WindowResolution},
     winit::WinitSettings,
-    world_serialization::WorldInstanceReady,
 };
-use bevy::color::palettes::css;
-use bevy::ecs::system::entity_command::insert;
-use bevy_cube_marcher::gpu::*;
-use bevy_cube_marcher::*;
+use bevy_voxel_world::prelude::*;
+use noise::{HybridMulti, NoiseFn, Perlin};
 
 
+// Declare materials as consts for convenience
+const SNOWY_BRICK: u8 = 0;
+const FULL_BRICK: u8 = 1;
+const GRASS: u8 = 2;
 
+#[derive(Resource, Clone, Default)]
+struct MyWorld;
 
-use crate::settings::{settings_ui, Settings};
+impl VoxelWorldConfig for MyWorld {
+    type MaterialIndex = u8;
+    type ChunkUserBundle = ();
 
-
-#[derive(TypePath)]
-struct MyComputeSampler;
-
-impl GpuChunkComputer for MyComputeSampler {
-    fn shader() -> ShaderRef {
-        "sdf.wgsl".into()
+    fn texture_index_mapper(
+        &self,
+    ) -> Arc<dyn Fn(Self::MaterialIndex) -> [u32; 3] + Send + Sync> {
+        Arc::new(|vox_mat: u8| match vox_mat {
+            SNOWY_BRICK => [0, 1, 2],
+            FULL_BRICK => [2, 2, 2],
+            GRASS => [3, 3, 3],
+            _ => [3, 3, 3],
+        })
     }
+
+    fn voxel_texture(&self) -> Option<(String, u32)> {
+        Some(("example_voxel_texture.png".into(), 4))
+    }
+
+    fn spawning_distance(&self) -> u32 {
+        25
+    }
+
+    fn min_despawn_distance(&self) -> u32 {
+        1
+    }
+
+    fn voxel_lookup_delegate(&self) -> VoxelLookupDelegate<Self::MaterialIndex> {
+        Box::new(move |_chunk_pos, _lod, _previous| get_voxel_fn())
+    }
+
 }
 
-
-mod voxels;
-mod settings;
-
-#[derive(FromArgs, Resource, Clone)]
-/// Config
-pub struct Args {
-    /// seed
-    #[argh(option, default = "42")]
-    seed: u64,
-
-    /// size
-    #[argh(option, default = "30")]
-    size: u32,
-
-    /// adds NoCpuCulling to all meshes
-    #[argh(switch)]
-    no_cpu_culling: bool,
-}
 
 fn main() {
-    let args: Args = argh::from_env();
-
     App::new()
-        .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "bevy_city".into(),
-                    resolution: WindowResolution::new(1920, 1080).with_scale_factor_override(1.0),
-                    present_mode: PresentMode::AutoNoVsync,
-                    position: WindowPosition::Centered(MonitorSelection::Primary),
-                    ..default()
-                }),
+        .add_plugins((DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "voxel_inyun".into(),
+                resolution: WindowResolution::new(1920, 1080).with_scale_factor_override(1.0),
+                present_mode: PresentMode::AutoNoVsync,
+                position: WindowPosition::Centered(MonitorSelection::Primary),
                 ..default()
             }),
-            FreeCameraPlugin,
-            FeathersPlugins,
-            WireframePlugin::default(),
-            GpuMarchingCubesPlugin::<MyComputeSampler, (), StandardMaterial>::default(),
-        ))
-        .insert_resource(args.clone())
-        .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(WinitSettings::continuous())
-        .insert_resource(ChunkGeneratorSettings::<MyComputeSampler>::new(64, 8.0).with_max_chunks_per_frame(8))
-        .init_resource::<Settings>()
-        .insert_resource(UiTheme(create_dark_theme()))
-        .insert_resource(WireframeConfig {
-            global: false,
-            default_color: WHITE.into(),
             ..default()
-        })
-        // Like in many realistic large scenes, many of the objects don't move
-        // We can accelerate transform propagation by optimizing for this case
+        }), FreeCameraPlugin, FeathersPlugins, WireframePlugin::default(),VoxelWorldPlugin::with_config(MyWorld)))
+        .insert_resource(WinitSettings::continuous())
+        .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(StaticTransformOptimizations::Enabled)
-        .add_systems(Startup, (scene.spawn(), spawn_atmosphere, spawn_terrain))
-        .add_observer(add_no_cpu_culling_on_scene_ready)
+        .add_systems(Startup,(scene.spawn(), spawn_atmosphere,create_voxel_scene))
+        .add_systems(PostStartup, attach_voxel_camera)
         .run();
+
 }
 
 fn scene() -> impl SceneList {
     bsn_list![camera(), sun()]
 }
 
+// fn terrain() -> impl Scene {
+//     bsn!{
+//
+//             Mesh3d(asset_value(Circle::new(40.0)))
+//             MeshMaterial3d::<StandardMaterial>(asset_value(Color::WHITE))
+//             Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+//     }
+// }
 
 fn camera() -> impl Scene {
     bsn! {
@@ -136,19 +119,28 @@ fn camera() -> impl Scene {
         TemporalAntiAliasing
         ContactShadows
     }
+
 }
 
-
+fn attach_voxel_camera(
+    mut commands: Commands,
+    camera_query: Query<Entity, (With<Camera>, Without<VoxelWorldCamera<MyWorld>>)>,
+) {
+    if let Ok(entity) = camera_query.single() {
+        commands.entity(entity).insert(VoxelWorldCamera::<MyWorld>::default());
+    }
+}
 fn sun() -> impl Scene {
     bsn! {
         DirectionalLight {
-            shadow_maps_enabled: {Settings::default().shadow_maps_enabled},
-            contact_shadows_enabled: {Settings::default().contact_shadows_enabled},
+            shadow_maps_enabled: true,
+            contact_shadows_enabled: true,
             illuminance: light_consts::lux::RAW_SUNLIGHT,
         }
         template_value(Transform::from_xyz(1.0, 0.15, 1.0).looking_at(Vec3::ZERO, Vec3::Y))
     }
 }
+
 
 /// Spawns the earth atmosphere plus an extra near-ground fog term.
 fn spawn_atmosphere(
@@ -194,44 +186,67 @@ fn spawn_atmosphere(
     ));
 }
 
+fn create_voxel_scene(mut voxel_world: VoxelWorld<MyWorld>) {
+    // Then we can use the `u8` consts to specify the type of voxel
 
-/// Adds [`NoCpuCulling`] to all meshes in the scene after the city is done spawning
-fn add_no_cpu_culling(
-    mut commands: Commands,
-    meshes: Query<Entity, (With<Mesh3d>, Without<NoCpuCulling>)>,
-    args: Res<Args>,
-) {
-    if args.no_cpu_culling {
-        for entity in meshes.iter() {
-            commands.entity(entity).insert(NoCpuCulling);
+    // 20 by 20 floor
+    for x in -10..10 {
+        for z in -10..10 {
+            voxel_world.set_voxel(IVec3::new(x, -1, z), WorldVoxel::Solid(GRASS));
+            // Grassy floor
         }
     }
+
+    // Some bricks
+    voxel_world.set_voxel(IVec3::new(0, 0, 0), WorldVoxel::Solid(SNOWY_BRICK));
+    voxel_world.set_voxel(IVec3::new(1, 0, 0), WorldVoxel::Solid(SNOWY_BRICK));
+    voxel_world.set_voxel(IVec3::new(0, 0, 1), WorldVoxel::Solid(SNOWY_BRICK));
+    voxel_world.set_voxel(IVec3::new(0, 0, -1), WorldVoxel::Solid(SNOWY_BRICK));
+    voxel_world.set_voxel(IVec3::new(-1, 0, 0), WorldVoxel::Solid(FULL_BRICK));
+    voxel_world.set_voxel(IVec3::new(-2, 0, 0), WorldVoxel::Solid(FULL_BRICK));
+    voxel_world.set_voxel(IVec3::new(-1, 1, 0), WorldVoxel::Solid(SNOWY_BRICK));
+    voxel_world.set_voxel(IVec3::new(-2, 1, 0), WorldVoxel::Solid(SNOWY_BRICK));
+    voxel_world.set_voxel(IVec3::new(0, 1, 0), WorldVoxel::Solid(SNOWY_BRICK));
 }
 
-/// Adds [`NoCpuCulling`] to all meshes in all scenes after the city is done spawning
-///
-/// This is required because a few assets are spawned using a [`WorldAssetRoot`] instead of directly
-/// spawning a [`Mesh`]
-fn add_no_cpu_culling_on_scene_ready(
-    scene_ready: On<WorldInstanceReady>,
-    mut commands: Commands,
-    children: Query<&Children>,
-    meshes: Query<(), (With<Mesh3d>, Without<NoCpuCulling>)>,
-    args: Res<Args>,
-) {
-    if args.no_cpu_culling {
-        for descendant in children.iter_descendants(scene_ready.entity) {
-            if meshes.get(descendant).is_ok() {
-                commands.entity(descendant).insert(NoCpuCulling);
+fn get_voxel_fn() -> Box<dyn FnMut(IVec3, Option<WorldVoxel>) -> WorldVoxel + Send + Sync>
+{
+    // Set up some noise to use as the terrain height map
+    let mut noise = HybridMulti::<Perlin>::new(1234);
+    noise.octaves = 5;
+    noise.frequency = 1.1;
+    noise.lacunarity = 2.8;
+    noise.persistence = 0.4;
+
+    // We use this to cache the noise value for each y column so we only need
+    // to calculate it once per x/z coordinate
+    let mut cache = HashMap::<(i32, i32), f64>::new();
+
+    // Then we return this boxed closure that captures the noise and the cache
+    // This will get sent off to a separate thread for meshing by bevy_voxel_world
+    Box::new(move |pos: IVec3, _previous| {
+        // Sea level
+        if pos.y < 1 {
+            return WorldVoxel::Solid(3);
+        }
+
+        let [x, y, z] = pos.as_dvec3().to_array();
+
+        // If y is less than the noise sample, we will set the voxel to solid
+        let is_ground = y < match cache.get(&(pos.x, pos.z)) {
+            Some(sample) => *sample,
+            None => {
+                let sample = noise.get([x / 1000.0, z / 1000.0]) * 50.0;
+                cache.insert((pos.x, pos.z), sample);
+                sample
             }
+        };
+
+        if is_ground {
+            // Solid voxel of material type 0
+            WorldVoxel::Solid(0)
+        } else {
+            WorldVoxel::Air
         }
-    }
-}
-
-fn spawn_terrain(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
-    commands.spawn(ChunkLoader::<MyComputeSampler>::new(8));
-
-    commands.insert_resource(ChunkMaterial::<MyComputeSampler, StandardMaterial>::new(
-        materials.add(Color::from(css::DARK_GREEN)),
-    ));
+    })
 }

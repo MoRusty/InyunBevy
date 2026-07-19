@@ -17,7 +17,6 @@ use rand::RngExt;
 
 #[derive(Resource)]
 pub struct Settings {
-    pub simulate_cars: bool,
     pub shadow_maps_enabled: bool,
     pub contact_shadows_enabled: bool,
     pub wireframe_enabled: bool,
@@ -27,10 +26,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            simulate_cars: true,
             shadow_maps_enabled: true,
             contact_shadows_enabled: true,
-            wireframe_enabled: false,
+            wireframe_enabled: true,
             cpu_culling: true,
         }
     }

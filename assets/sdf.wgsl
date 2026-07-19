@@ -24,10 +24,10 @@ fn density_index(coord: vec3<u32>) -> u32 {
 
 fn terrain_height(xz: vec2<f32>) -> f32 {
     // Extremely low frequency = very wide hills
-    let freq = 0.2;
+    let freq = 0.09;
 
     // Very small amplitude = only 0.4 units of vertical difference
-    let amp = 0.8;
+    let amp = 1.1;
 
 
     // Setting Y to 0.0 forces it to behave like a flat heightmap.
